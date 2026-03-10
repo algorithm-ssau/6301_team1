@@ -165,10 +165,54 @@
 
 <h2 align="center">👾</h2> 
 
-<p align="center"></p> 
+<p align="center">С технической точки зрения наш проект – это интеллектуальный ORM-конвейер, объединяющий возможности обработки естественного языка, оптического распознавания символов и классического планировщика задач.</p> 
 
 
-<br>
+<h2 align="center">👾</h2> 
+
+<p align="center">Система спроектирована так, чтобы быть полностью кроссплатформенной и работать в среде Google Colab, что позволяет запускать её с любого устройства без сложной настройки.</p> 
+
+
+<br><br> 
+
+```mermaid
+%%{init: {'theme': 'default', 'themeVariables': {
+  'primaryColor': '#2c3e50',
+  'primaryTextColor': '#fff',
+  'primaryBorderColor': '#7f8c8d',
+  'lineColor': '#34495e',
+  'secondaryColor': '#34495e',
+  'tertiaryColor': '#fff'
+}}}%%
+mindmap
+  root((StudyMate AI))
+    ИИ и NLP
+      GigaChat API
+      YandexGPT
+      Промптинг
+    Базы данных
+      PostgreSQL
+      SQLite
+      Redis
+    Интеграции
+      Google Calendar
+      Obsidian
+      VK API
+    Инфраструктура
+      Google Colab
+      Docker
+      Git
+    OCR
+      Tesseract
+      Yandex Vision
+      Google Vision
+    Python 3.9
+      LangChain
+      Celery
+      OpenCV
+```
+
+<br><br> 
  
 <div align="center">
   <img src="https://github.com/algorithm-ssau/6301_team1/blob/main/%D0%98%D0%B7%D0%BE%D0%B1%D1%80%D0%B0%D0%B6%D0%B5%D0%BD%D0%B8%D1%8F/%D0%92%D0%BA%D0%BB%D0%B0%D0%B4%20%D1%83%D1%87%D0%B0%D1%81%D1%82%D0%BD%D0%B8%D0%BA%D0%BE%D0%B2%20%D0%BA%D0%BE%D0%BC%D0%B0%D0%BD%D0%B4%D1%8B.png">
