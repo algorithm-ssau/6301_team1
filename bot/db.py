@@ -1,0 +1,57 @@
+import sqlite3
+import json
+from typing import Any
+
+class Database:
+    def __init__(self, db_path='bot_database.db'):
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.cur = self.conn.cursor()
+        self._init()
+
+    def _init(self):
+        self.cur.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                state TEXT DEFAULT 'main_menu',
+                current_subject TEXT,
+                subjects TEXT DEFAULT '[]',
+                temp_data TEXT
+            )
+        ''')
+        self.conn.commit()
+
+    def get_user(self, user_id: int):
+        self.cur.execute(
+            'SELECT state,current_subject,subjects,temp_data FROM users WHERE user_id=?',
+            (user_id,))
+        row = self.cur.fetchone()
+        if row is None:
+            self.cur.execute('INSERT INTO users(user_id) VALUES (?)', (user_id,))
+            self.conn.commit()
+            return 'main_menu', None, [], {}
+        state, subj, subs, td = row
+        return state, subj, json.loads(subs or '[]'), json.loads(td) if td else {}
+
+    def set_state(self, user_id: int, state: str):
+        self.cur.execute('UPDATE users SET state=? WHERE user_id=?', (state, user_id))
+        self.conn.commit()
+
+    def set_subject(self, user_id: int, subject):
+        self.cur.execute('UPDATE users SET current_subject=? WHERE user_id=?',
+                         (subject, user_id))
+        self.conn.commit()
+
+    def set_temp(self, user_id: int, data: dict[str, Any] | None):
+        val = json.dumps(data, ensure_ascii=False) if data else None
+        self.cur.execute('UPDATE users SET temp_data=? WHERE user_id=?', (val, user_id))
+        self.conn.commit()
+
+    def add_subject(self, user_id: int, name: str) -> bool:
+        _, _, subs, _ = self.get_user(user_id)
+        if name in subs:
+            return False
+        subs.append(name)
+        self.cur.execute('UPDATE users SET subjects=? WHERE user_id=?',
+                         (json.dumps(subs, ensure_ascii=False), user_id))
+        self.conn.commit()
+        return True

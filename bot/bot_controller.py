@@ -1,0 +1,272 @@
+import re
+import json
+import datetime as dt
+from vk_api.utils import get_random_id
+
+import vk_view as V
+
+DATE_STEPS = ['year', 'month', 'day', 'hour', 'minute']
+
+
+def _safe_filename(s: str) -> str:
+    return re.sub(r'[\\/*?:"<>|]', '', s).strip() or 'Без названия'
+
+
+class BotController:
+    def __init__(self, vk, db, calendar, drive):
+        self.vk = vk
+        self.db = db
+        self.cal = calendar
+        self.drive = drive
+
+    # ---------- отправка ----------
+    def send(self, peer_id, text, kb=None):
+        p = {'peer_id': peer_id, 'message': text, 'random_id': get_random_id()}
+        if kb is not None:
+            p['keyboard'] = kb.get_keyboard()
+        self.vk.method('messages.send', p)
+
+    def send_main(self, peer_id, text='Главное меню:'):
+        self.db.set_state(peer_id, 'main_menu')
+        self.db.set_temp(peer_id, None)
+        self.send(peer_id, text, V.kb_main())
+
+    # ---------- вход ----------
+    def handle(self, peer_id: int, text: str, payload: dict | None):
+        state, subject, subjects, temp = self.db.get_user(peer_id)
+        a = (payload or {}).get('a')
+        v = (payload or {}).get('v')
+
+        # глобальная отмена (но не во время выбора даты — там своя логика)
+        if a == 'cancel' and not state.startswith('date_'):
+            self.send_main(peer_id, 'Отменено.')
+            return
+
+        # роутинг по состоянию
+        try:
+            handler = getattr(self, f'st_{state}', None)
+            if handler:
+                handler(peer_id, text, a, v, subject, subjects, temp)
+            else:
+                self.send_main(peer_id)
+        except Exception as e:
+            self.send(peer_id, f'❌ Ошибка: {e}', V.kb_main())
+            self.db.set_state(peer_id, 'main_menu')
+            self.db.set_temp(peer_id, None)
+
+    # ---------- состояния ----------
+    def st_main_menu(self, pid, text, a, v, subj, subs, temp):
+        if a == 'subjects':
+            self.db.set_state(pid, 'selecting_subject')
+            self.send(pid, 'Ваши предметы:' if subs else 'Предметов ещё нет.',
+                      V.kb_subjects(subs))
+        elif a == 'upcoming':
+            self.show_upcoming(pid)
+        else:
+            self.send(pid, 'Пользуйся кнопками.', V.kb_main())
+
+    def st_selecting_subject(self, pid, text, a, v, subj, subs, temp):
+        if a == 'add_subject':
+            self.db.set_state(pid, 'wait_new_subject')
+            self.send(pid, 'Введи название нового предмета:', V.kb_cancel())
+        elif a == 'pick_subject' and v in subs:
+            self.db.set_subject(pid, v)
+            self.db.set_state(pid, 'subject_menu')
+            self.send(pid, f'Выбран: {v}', V.kb_subject_actions())
+        else:
+            self.send(pid, 'Используй кнопки.', V.kb_subjects(subs))
+
+    def st_wait_new_subject(self, pid, text, a, v, subj, subs, temp):
+        if not text:
+            self.send(pid, 'Нужен текст.', V.kb_cancel()); return
+        ok = self.db.add_subject(pid, text.strip())
+        msg = f"Добавлен '{text}'." if ok else 'Такой предмет уже есть.'
+        _, _, subs, _ = self.db.get_user(pid)
+        self.db.set_state(pid, 'selecting_subject')
+        self.send(pid, msg, V.kb_subjects(subs))
+
+    def st_subject_menu(self, pid, text, a, v, subj, subs, temp):
+        if a == 'write_note':
+            self.db.set_state(pid, 'wait_note_title')
+            self.send(pid, 'Название конспекта:', V.kb_cancel())
+        elif a == 'search':
+            self.db.set_state(pid, 'search_menu')
+            self.send(pid, 'Как ищем?', V.kb_search())
+        elif a == 'back_subjects':
+            self.db.set_state(pid, 'selecting_subject')
+            self.send(pid, 'Предметы:', V.kb_subjects(subs))
+        else:
+            self.send(pid, 'Используй кнопки.', V.kb_subject_actions())
+
+    def st_wait_note_title(self, pid, text, a, v, subj, subs, temp):
+        if not text:
+            self.send(pid, 'Нужен текст.', V.kb_cancel()); return
+        self.db.set_temp(pid, {'title': text.strip()})
+        self.db.set_state(pid, 'wait_note_text')
+        self.send(pid, f"Название: «{text}».\nТеперь пришли текст конспекта:",
+                  V.kb_cancel())
+
+    def st_wait_note_text(self, pid, text, a, v, subj, subs, temp):
+        if not text:
+            self.send(pid, 'Нужен текст.', V.kb_cancel()); return
+        title = (temp or {}).get('title', 'Без названия')
+        date_str = dt.datetime.now().strftime('%d.%m.%Y')
+        filename = f"[{subj}] {_safe_filename(title)}.md"
+        body = (f"Название: {title}\nПредмет: {subj}\nДата: {date_str}\n\n"
+                f"Конспект:\n{text}")
+        fid, link = self.drive.upload_note(filename, body)
+        self.db.set_temp(pid, {'title': title, 'file_id': fid, 'link': link})
+        self.db.set_state(pid, 'ask_reminder')
+        self.send(pid,
+                  f"✅ Сохранено на Drive:\n{link}\n\nПоставить напоминание в календаре?",
+                  V.kb_yes_no_reminder())
+
+    def st_ask_reminder(self, pid, text, a, v, subj, subs, temp):
+        if a == 'rem_yes':
+            self.db.set_state(pid, 'date_year')
+            self.send(pid, 'Выбери год:', V.kb_years())
+        elif a == 'rem_no':
+            self.send_main(pid, 'Готово. Без напоминания.')
+        else:
+            self.send(pid, 'Выбери Да или Нет.', V.kb_yes_no_reminder())
+
+    # ---- выбор даты ----
+    def st_date_year(self, pid, text, a, v, subj, subs, temp):
+        if a == 'cancel':
+            self.send_main(pid, 'Отменено.'); return
+        if a == 'year':
+            self._date_set(pid, temp, 'year', v)
+            self.db.set_state(pid, 'date_month')
+            self.send(pid, f"Год: {v}\nМесяц:", V.kb_months())
+        else:
+            self.send(pid, 'Выбери год.', V.kb_years())
+
+    def st_date_month(self, pid, text, a, v, subj, subs, temp):
+        if a == 'cancel': self.send_main(pid, 'Отменено.'); return
+        if a == 'back':
+            self.db.set_state(pid, 'date_year'); self.send(pid, 'Год:', V.kb_years()); return
+        if a == 'month':
+            self._date_set(pid, temp, 'month', v)
+            self.db.set_state(pid, 'date_day')
+            self.send(pid, f"{temp['year']}-{v:02d}\nДень:",
+                      V.kb_days(temp['year'], v))
+        else:
+            self.send(pid, 'Выбери месяц.', V.kb_months())
+
+    def st_date_day(self, pid, text, a, v, subj, subs, temp):
+        if a == 'cancel': self.send_main(pid, 'Отменено.'); return
+        if a == 'back':
+            self.db.set_state(pid, 'date_month'); self.send(pid, 'Месяц:', V.kb_months()); return
+        if a == 'day':
+            self._date_set(pid, temp, 'day', v)
+            self.db.set_state(pid, 'date_hour')
+            self.send(pid, 'Час:', V.kb_hours())
+        else:
+            self.send(pid, 'Выбери день.', V.kb_days(temp['year'], temp['month']))
+
+    def st_date_hour(self, pid, text, a, v, subj, subs, temp):
+        if a == 'cancel': self.send_main(pid, 'Отменено.'); return
+        if a == 'back':
+            self.db.set_state(pid, 'date_day')
+            self.send(pid, 'День:', V.kb_days(temp['year'], temp['month'])); return
+        if a == 'hour':
+            self._date_set(pid, temp, 'hour', v)
+            self.db.set_state(pid, 'date_minute')
+            self.send(pid, 'Минуты:', V.kb_minutes())
+        else:
+            self.send(pid, 'Выбери час.', V.kb_hours())
+
+    def st_date_minute(self, pid, text, a, v, subj, subs, temp):
+        if a == 'cancel': self.send_main(pid, 'Отменено.'); return
+        if a == 'back':
+            self.db.set_state(pid, 'date_hour'); self.send(pid, 'Час:', V.kb_hours()); return
+        if a == 'minute':
+            self._date_set(pid, temp, 'minute', v)
+            self._create_reminder(pid, subj, temp)
+        else:
+            self.send(pid, 'Выбери минуты.', V.kb_minutes())
+
+    def _date_set(self, pid, temp, key, val):
+        temp = dict(temp or {})
+        temp[key] = val
+        self.db.set_temp(pid, temp)
+
+    def _create_reminder(self, pid, subject, temp):
+        _, _, _, temp = self.db.get_user(pid)
+        start = dt.datetime(temp['year'], temp['month'], temp['day'],
+                            temp['hour'], temp['minute'])
+        end = start + dt.timedelta(hours=1)
+        title = temp.get('title', 'Конспект')
+        link = temp.get('link', '')
+        summary = f"[{subject}] {title}"
+        desc = f"Конспект: {link}" if link else ''
+        ev = self.cal.add_event(summary, start, end, description=desc,
+                                drive_file_id=temp.get('file_id'))
+        self.send_main(pid,
+                       f"✅ Напоминание создано на {start:%d.%m.%Y %H:%M}\n"
+                       f"{ev.get('htmlLink', '')}")
+
+    # ---- поиск ----
+    def st_search_menu(self, pid, text, a, v, subj, subs, temp):
+        if a == 'search_all':
+            self._show_search(pid, subj, 'all', '')
+        elif a == 'search_title':
+            self.db.set_state(pid, 'wait_search_title')
+            self.send(pid, 'Слово из названия:', V.kb_cancel())
+        elif a == 'search_date':
+            self.db.set_state(pid, 'wait_search_date')
+            self.send(pid, 'Дата в формате ДД.ММ.ГГГГ:', V.kb_cancel())
+        else:
+            self.send(pid, 'Используй кнопки.', V.kb_search())
+
+    def st_wait_search_title(self, pid, text, a, v, subj, subs, temp):
+        if not text: self.send(pid, 'Нужен текст.', V.kb_cancel()); return
+        self._show_search(pid, subj, 'title', text.strip())
+
+    def st_wait_search_date(self, pid, text, a, v, subj, subs, temp):
+        if not text: self.send(pid, 'Нужен текст.', V.kb_cancel()); return
+        self._show_search(pid, subj, 'date', text.strip())
+
+    def _show_search(self, pid, subject, kind, query):
+        notes = self.drive.list_notes(subject=subject)
+        results = []
+        for n in notes:
+            name = n['name']
+            if kind == 'title' and query.lower() not in name.lower():
+                continue
+            if kind == 'date':
+                content = self.drive.download_text(n['id'])
+                if f'Дата: {query}' not in content:
+                    continue
+            clean = name.replace(f'[{subject}] ', '').replace('.md', '')
+            results.append(f"📄 {clean}\n{n['webViewLink']}")
+        if not results:
+            txt = 'Ничего не найдено.'
+        else:
+            txt = f"Найдено ({len(results)}):\n\n" + '\n\n'.join(results[:10])
+            if len(results) > 10:
+                txt += f"\n\n…ещё {len(results) - 10}"
+        self.db.set_state(pid, 'subject_menu')
+        self.send(pid, txt, V.kb_subject_actions())
+
+    # ---- что скоро ----
+    def show_upcoming(self, pid):
+        events = self.cal.list_upcoming(days=7)
+        events = [e for e in events if self.cal.get_drive_id(e)]
+        if not events:
+            self.send(pid, 'Ближайших напоминаний нет.', V.kb_main()); return
+        for ev in events[:5]:
+            start = ev['start'].get('dateTime', ev['start'].get('date'))
+            fid = self.cal.get_drive_id(ev)
+            try:
+                content = self.drive.download_text(fid)
+            except Exception as e:
+                content = f'(не удалось получить файл: {e})'
+            # обрежем чтобы не превысить лимит сообщения
+            if len(content) > 3500:
+                content = content[:3500] + '\n…(обрезано)'
+            self.send(pid,
+                      f"⏰ {ev.get('summary', '')}\n"
+                      f"🕒 {start}\n\n{content}")
+        self.send(pid, 'Главное меню:', V.kb_main())
+        self.db.set_state(pid, 'main_menu')
