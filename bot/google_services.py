@@ -2,6 +2,7 @@ import os
 import io
 import datetime as dt
 from typing import Optional
+import json
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -18,6 +19,15 @@ TOKEN_FILE = 'token.json'
 DRIVE_FOLDER_NAME = 'Obsidian_Bot'
 DRIVE_FILE_PROP = 'driveFileId'  # ключ в extendedProperties события
 
+
+def creds_from_json(raw: str) -> Credentials | None:
+    if not raw:
+        return None
+    info = json.loads(raw)
+    creds = Credentials.from_authorized_user_info(info, SCOPES)
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+    return creds
 
 def get_credentials() -> Credentials:
     creds = None

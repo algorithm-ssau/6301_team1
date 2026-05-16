@@ -2,6 +2,7 @@ import re
 import json
 import datetime as dt
 from vk_api.utils import get_random_id
+from ai_helper import summarize, is_enabled as ai_on
 
 import vk_view as V
 
@@ -13,11 +14,19 @@ def _safe_filename(s: str) -> str:
 
 
 class BotController:
-    def __init__(self, vk, db, calendar, drive):
+    def __init__(self, vk, db):
         self.vk = vk
         self.db = db
-        self.cal = calendar
-        self.drive = drive
+
+    def _services(self, user_id):
+        from google_services import creds_from_json, CalendarAPI, DriveAPI
+        creds = creds_from_json(self.db.get_creds(user_id))
+        if creds is None:
+            return None, None
+        # обновлённый токен сохраняем
+        self.db.set_creds(user_id, creds.to_json())
+        return CalendarAPI(creds), DriveAPI(creds)
+
 
     # ---------- отправка ----------
     def send(self, peer_id, text, kb=None):
@@ -32,7 +41,14 @@ class BotController:
         self.send(peer_id, text, V.kb_main())
 
     # ---------- вход ----------
-    def handle(self, peer_id: int, text: str, payload: dict | None):
+    def handle(self, peer_id, text, payload):
+        if self.db.get_creds(peer_id) is None:
+            from auth_server import auth_url_for
+            self.send(peer_id,
+                      'Чтобы бот мог писать в твой Google Календарь и Drive, '
+                      f'авторизуйся: {auth_url_for(peer_id)}')
+            return
+
         state, subject, subjects, temp = self.db.get_user(peer_id)
         a = (payload or {}).get('a')
         v = (payload or {}).get('v')
@@ -107,6 +123,7 @@ class BotController:
                   V.kb_cancel())
 
     def st_wait_note_text(self, pid, text, a, v, subj, subs, temp):
+        cal, drive = self._services(pid)
         if not text:
             self.send(pid, 'Нужен текст.', V.kb_cancel()); return
         title = (temp or {}).get('title', 'Без названия')
@@ -114,7 +131,7 @@ class BotController:
         filename = f"[{subj}] {_safe_filename(title)}.md"
         body = (f"Название: {title}\nПредмет: {subj}\nДата: {date_str}\n\n"
                 f"Конспект:\n{text}")
-        fid, link = self.drive.upload_note(filename, body)
+        fid, link = drive.upload_note(filename, body)
         self.db.set_temp(pid, {'title': title, 'file_id': fid, 'link': link})
         self.db.set_state(pid, 'ask_reminder')
         self.send(pid,
@@ -200,7 +217,8 @@ class BotController:
         link = temp.get('link', '')
         summary = f"[{subject}] {title}"
         desc = f"Конспект: {link}" if link else ''
-        ev = self.cal.add_event(summary, start, end, description=desc,
+        cal, drive = self._services(pid)
+        ev = cal.add_event(summary, start, end, description=desc,
                                 drive_file_id=temp.get('file_id'))
         self.send_main(pid,
                        f"✅ Напоминание создано на {start:%d.%m.%Y %H:%M}\n"
@@ -228,14 +246,15 @@ class BotController:
         self._show_search(pid, subj, 'date', text.strip())
 
     def _show_search(self, pid, subject, kind, query):
-        notes = self.drive.list_notes(subject=subject)
+        cal, drive = self._services(pid)
+        notes = drive.list_notes(subject=subject)
         results = []
         for n in notes:
             name = n['name']
             if kind == 'title' and query.lower() not in name.lower():
                 continue
             if kind == 'date':
-                content = self.drive.download_text(n['id'])
+                content = drive.download_text(n['id'])
                 if f'Дата: {query}' not in content:
                     continue
             clean = name.replace(f'[{subject}] ', '').replace('.md', '')
@@ -251,22 +270,22 @@ class BotController:
 
     # ---- что скоро ----
     def show_upcoming(self, pid):
-        events = self.cal.list_upcoming(days=7)
-        events = [e for e in events if self.cal.get_drive_id(e)]
+        cal, drive = self._services(pid)
+        events = cal.list_upcoming(days=7)
+        events = [e for e in events if cal.get_drive_id(e)]
         if not events:
             self.send(pid, 'Ближайших напоминаний нет.', V.kb_main()); return
         for ev in events[:5]:
             start = ev['start'].get('dateTime', ev['start'].get('date'))
-            fid = self.cal.get_drive_id(ev)
+            fid = self.cal_helper.get_drive_id(ev) if False else None  # см. ниже
+            fid = ev.get('extendedProperties', {}).get('private', {}).get('driveFileId')
             try:
-                content = self.drive.download_text(fid)
+                raw = drive.download_text(fid)
+                body = summarize(raw)
             except Exception as e:
-                content = f'(не удалось получить файл: {e})'
-            # обрежем чтобы не превысить лимит сообщения
-            if len(content) > 3500:
-                content = content[:3500] + '\n…(обрезано)'
+                body = f'(не удалось получить файл: {e})'
+            prefix = '🤖 Краткий пересказ:' if ai_on() else '📝 Текст конспекта:'
             self.send(pid,
-                      f"⏰ {ev.get('summary', '')}\n"
-                      f"🕒 {start}\n\n{content}")
+                      f"⏰ {ev.get('summary', '')}\n🕒 {start}\n\n{prefix}\n{body}")
         self.send(pid, 'Главное меню:', V.kb_main())
         self.db.set_state(pid, 'main_menu')

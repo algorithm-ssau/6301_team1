@@ -10,14 +10,32 @@ class Database:
 
     def _init(self):
         self.cur.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                state TEXT DEFAULT 'main_menu',
-                current_subject TEXT,
-                subjects TEXT DEFAULT '[]',
-                temp_data TEXT
-            )
-        ''')
+        CREATE TABLE IF NOT EXISTS users 
+        (
+            user_id INTEGER PRIMARY KEY,
+            state TEXT DEFAULT 'main_menu',
+            current_subject TEXT,
+            subjects TEXT DEFAULT '[]',
+            temp_data TEXT,
+            google_creds TEXT
+        )
+                         ''')
+
+        # для уже существующей БД
+        cols = {r[1] for r in self.cur.execute("PRAGMA table_info(users)").fetchall()}
+        if 'google_creds' not in cols:
+            self.cur.execute('ALTER TABLE users ADD COLUMN google_creds TEXT')
+        self.conn.commit()
+
+    def get_creds(self, user_id: int) -> str | None:
+        self.cur.execute('SELECT google_creds FROM users WHERE user_id=?', (user_id,))
+        row = self.cur.fetchone()
+        return row[0] if row and row[0] else None
+
+    def set_creds(self, user_id: int, creds_json: str):
+        self.cur.execute('INSERT OR IGNORE INTO users(user_id) VALUES (?)', (user_id,))
+        self.cur.execute('UPDATE users SET google_creds=? WHERE user_id=?',
+                         (creds_json, user_id))
         self.conn.commit()
 
     def get_user(self, user_id: int):
