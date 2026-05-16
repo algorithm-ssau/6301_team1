@@ -1,0 +1,53 @@
+class VKView:
+    def __init__(self, vk_api_method):
+        self.vk = vk_api_method
+
+    def send_message(self, user_id, text, keyboard=None):
+        post = {'user_id': user_id, 'message': text, 'random_id': 0}
+        if keyboard is not None:
+            post['keyboard'] = keyboard
+        self.vk.messages.send(**post)
+
+    def get_main_menu(self):
+        kb = VkKeyboard(one_time=False)
+        kb.add_button('Выбрать предмет', color=VkKeyboardColor.PRIMARY)
+        return kb.get_keyboard()
+
+    def get_subjects_menu(self, user_subjects):
+        kb = VkKeyboard(one_time=False)
+        if not user_subjects:
+            kb.add_button('Добавить предмет', color=VkKeyboardColor.POSITIVE)
+        else:
+            for i, subject in enumerate(user_subjects):
+                kb.add_button(subject, color=VkKeyboardColor.PRIMARY)
+                if (i + 1) % 2 == 0 and i != len(user_subjects) - 1:
+                    kb.add_line()
+            kb.add_line()
+            kb.add_button('Добавить предмет', color=VkKeyboardColor.POSITIVE)
+        kb.add_line()
+        kb.add_button('Назад', color=VkKeyboardColor.NEGATIVE)
+        return kb.get_keyboard()
+
+    def get_subject_action_menu(self, subject):
+        kb = VkKeyboard(one_time=False)
+        kb.add_button('Поиск / Просмотр', color=VkKeyboardColor.POSITIVE)
+        kb.add_line()
+        kb.add_button('Написать конспект', color=VkKeyboardColor.PRIMARY)
+        kb.add_line()
+        kb.add_button('Назад к предметам', color=VkKeyboardColor.NEGATIVE)
+        return kb.get_keyboard()
+
+    def get_search_menu(self):
+        kb = VkKeyboard(one_time=False)
+        kb.add_button('По названию', color=VkKeyboardColor.PRIMARY)
+        kb.add_button('По дате', color=VkKeyboardColor.PRIMARY)
+        kb.add_line()
+        kb.add_button('Все конспекты', color=VkKeyboardColor.SECONDARY)
+        kb.add_line()
+        kb.add_button('Отмена', color=VkKeyboardColor.NEGATIVE)
+        return kb.get_keyboard()
+
+    def get_cancel_menu(self):
+        kb = VkKeyboard(one_time=False)
+        kb.add_button('Отмена', color=VkKeyboardColor.NEGATIVE)
+        return kb.get_keyboard()

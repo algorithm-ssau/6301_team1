@@ -1,0 +1,19 @@
+try:
+    vk_session = vk_api.VkApi(token=VK_TOKEN)
+    vk = vk_session.get_api()
+    longpoll = VkLongPoll(vk_session)
+
+    db = Database()
+    view = VKView(vk)
+    obsidian_adapter = ObsidianAdapter(OBSIDIAN_FOLDER)
+
+    controller = BotController(db, view, obsidian_adapter)
+
+    print("Бот запущен.")
+
+    for event in longpoll.listen():
+        if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+            controller.handle_message(event.user_id, event.text)
+
+except Exception as e:
+    print(f"Ошибка при запуске: {e}")

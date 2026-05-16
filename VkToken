@@ -1,0 +1,15 @@
+import vk_api
+from vk_api.longpoll import VkLongPoll, VkEventType
+from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+import sqlite3
+import os
+import json
+import datetime
+from google.colab import drive
+
+drive.mount('/content/drive')
+OBSIDIAN_FOLDER = '/content/drive/MyDrive/Obsidian_Bot'
+if not os.path.exists(OBSIDIAN_FOLDER):
+    os.makedirs(OBSIDIAN_FOLDER)
+VK_TOKEN = "vk1.a.2bR6FTESYx6T-nJWKUB4yqZ73JtB7AIm9GV9Vq4TmSdSl4-hsStwxcfH90UQMocAP2UCm_FC8xzxnV9N7F5nsFywSlWz-Ut9OCOQ78Ml0qtXXB0KiV3zYY_Vcn-pfRfadtah_1jdghHqDgLKdAQDvMQJNM49ITzgxy0-CABmUyQyw1DVacUDTWyLpK0ES1rMpyPqeRFnj4Df3ftuO26A2A"
+

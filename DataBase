@@ -1,0 +1,56 @@
+import sqlite3
+import json
+
+class Database:
+    def __init__(self, db_path="bot_database.db"):
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.cursor = self.conn.cursor()
+        self._init_db()
+
+    def _init_db(self):
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                state TEXT DEFAULT 'main_menu',
+                current_subject TEXT DEFAULT NULL,
+                subjects TEXT
+            )
+        ''')
+        try:
+            self.cursor.execute('SELECT temp_data FROM users LIMIT 1')
+        except sqlite3.OperationalError:
+            self.cursor.execute('ALTER TABLE users ADD COLUMN temp_data TEXT')
+        self.conn.commit()
+
+    def get_user(self, user_id):
+        self.cursor.execute('SELECT state, current_subject, subjects, temp_data FROM users WHERE user_id = ?', (user_id,))
+        row = self.cursor.fetchone()
+
+        if row is None:
+            self.cursor.execute('INSERT INTO users (user_id, subjects) VALUES (?, ?)', (user_id, '[]'))
+            self.conn.commit()
+            return 'main_menu', None, [], None
+
+        subs = json.loads(row[2]) if row[2] else []
+        return row[0], row[1], subs, row[3]
+
+    def update_state(self, user_id, state):
+        self.cursor.execute('UPDATE users SET state = ? WHERE user_id = ?', (state, user_id))
+        self.conn.commit()
+
+    def update_subject(self, user_id, subject):
+        self.cursor.execute('UPDATE users SET current_subject = ? WHERE user_id = ?', (subject, user_id))
+        self.conn.commit()
+
+    def update_temp_data(self, user_id, data):
+        self.cursor.execute('UPDATE users SET temp_data = ? WHERE user_id = ?', (data, user_id))
+        self.conn.commit()
+
+    def add_custom_subject(self, user_id, new_subject):
+        _, _, subjects, _ = self.get_user(user_id)
+        if new_subject not in subjects:
+            subjects.append(new_subject)
+            self.cursor.execute('UPDATE users SET subjects = ? WHERE user_id = ?', (json.dumps(subjects), user_id))
+            self.conn.commit()
+            return True
+        return False

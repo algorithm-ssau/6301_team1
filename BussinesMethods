@@ -1,0 +1,107 @@
+class BotController:
+    def __init__(self, db, view, obsidian_adapter):
+        self.db = db
+        self.view = view
+        self.obsidian = obsidian_adapter
+
+    def handle_message(self, user_id, text):
+        text_lower = text.lower()
+        state, current_subject, subjects, temp_data = self.db.get_user(user_id)
+
+        if text_lower in ['отмена', 'назад', 'назад к предметам']:
+            self.db.update_temp_data(user_id, None)
+
+            if text_lower == 'назад к предметам':
+                self.db.update_state(user_id, 'selecting_subject')
+                self.view.send_message(user_id, "Ваши предметы:", self.view.get_subjects_menu(subjects))
+            else:
+                if state in ['search_menu', 'wait_search_title', 'wait_search_date', 'wait_note_title', 'wait_note_text']:
+                    self.db.update_state(user_id, 'subject_menu')
+                    self.view.send_message(user_id, "Действие отменено.", self.view.get_subject_action_menu(current_subject))
+                else:
+                    self.db.update_state(user_id, 'main_menu')
+                    self.view.send_message(user_id, "Главное меню:", self.view.get_main_menu())
+            return
+
+        if state == 'main_menu':
+            if text_lower in ['выбрать предмет', 'начать', 'start', 'привет']:
+                self.db.update_state(user_id, 'selecting_subject')
+                if not subjects:
+                    self.view.send_message(user_id, "У вас пока нет предметов. Добавьте первый!", self.view.get_subjects_menu(subjects))
+                else:
+                    self.view.send_message(user_id, "Выберите предмет:", self.view.get_subjects_menu(subjects))
+            else:
+                self.view.send_message(user_id, "Воспользуйтесь кнопкой меню.", self.view.get_main_menu())
+
+        elif state == 'selecting_subject':
+            if text_lower == 'добавить предмет':
+                self.db.update_state(user_id, 'wait_new_subject')
+                self.view.send_message(user_id, "Введите название нового предмета:", self.view.get_cancel_menu())
+            else:
+                selected = next((s for s in subjects if s.lower() == text_lower), None)
+                if selected:
+                    self.db.update_subject(user_id, selected)
+                    self.db.update_state(user_id, 'subject_menu')
+                    self.view.send_message(user_id, f"Выбран предмет: {selected}", self.view.get_subject_action_menu(selected))
+                else:
+                    self.view.send_message(user_id, "Используйте кнопки.", self.view.get_subjects_menu(subjects))
+
+        elif state == 'wait_new_subject':
+            if self.db.add_custom_subject(user_id, text):
+                self.view.send_message(user_id, f"Предмет '{text}' добавлен!")
+            else:
+                self.view.send_message(user_id, "Такой предмет уже существует.")
+
+            _, _, new_subs, _ = self.db.get_user(user_id)
+            self.db.update_state(user_id, 'selecting_subject')
+            self.view.send_message(user_id, "Ваши предметы:", self.view.get_subjects_menu(new_subs))
+
+        elif state == 'subject_menu':
+            if text_lower == 'поиск / просмотр':
+                self.db.update_state(user_id, 'search_menu')
+                self.view.send_message(user_id, "Как будем искать?", self.view.get_search_menu())
+
+            elif text_lower == 'написать конспект':
+                self.db.update_state(user_id, 'wait_note_title')
+                self.view.send_message(user_id, "Введите НАЗВАНИЕ конспекта (например: Лекция 1):", self.view.get_cancel_menu())
+            else:
+                self.view.send_message(user_id, "Используйте кнопки.", self.view.get_subject_action_menu(current_subject))
+
+        elif state == 'wait_note_title':
+            self.db.update_temp_data(user_id, text)
+            self.db.update_state(user_id, 'wait_note_text')
+            self.view.send_message(user_id, f"Название: '{text}'.\nТеперь отправьте ТЕКСТ конспекта:", self.view.get_cancel_menu())
+
+        elif state == 'wait_note_text':
+            title = temp_data if temp_data else "Без названия"
+            res = self.obsidian.export_note(current_subject, title, text)
+
+            self.db.update_temp_data(user_id, None)
+            self.db.update_state(user_id, 'subject_menu')
+            self.view.send_message(user_id, res, self.view.get_subject_action_menu(current_subject))
+
+        elif state == 'search_menu':
+            if text_lower == 'все конспекты':
+                res = self.obsidian.search_notes(current_subject, search_type="all")
+                self.db.update_state(user_id, 'subject_menu')
+                self.view.send_message(user_id, res, self.view.get_subject_action_menu(current_subject))
+
+            elif text_lower == 'по названию':
+                self.db.update_state(user_id, 'wait_search_title')
+                self.view.send_message(user_id, "Введите слово из названия конспекта:", self.view.get_cancel_menu())
+
+            elif text_lower == 'по дате':
+                self.db.update_state(user_id, 'wait_search_date')
+                self.view.send_message(user_id, "Введите дату в формате ДД.ММ.ГГГГ (например, 25.10.2023):", self.view.get_cancel_menu())
+            else:
+                self.view.send_message(user_id, "Используйте кнопки.", self.view.get_search_menu())
+
+        elif state == 'wait_search_title':
+            res = self.obsidian.search_notes(current_subject, search_type="title", query=text)
+            self.db.update_state(user_id, 'subject_menu')
+            self.view.send_message(user_id, res, self.view.get_subject_action_menu(current_subject))
+
+        elif state == 'wait_search_date':
+            res = self.obsidian.search_notes(current_subject, search_type="date", query=text)
+            self.db.update_state(user_id, 'subject_menu')
+            self.view.send_message(user_id, res, self.view.get_subject_action_menu(current_subject))
