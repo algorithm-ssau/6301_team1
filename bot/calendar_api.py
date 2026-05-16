@@ -6,7 +6,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 SCOPES = ['https://www.googleapis.com/auth/calendar']
-CREDENTIALS_FILE = 'bot/credentials_d.json'
+CREDENTIALS_FILE = 'credentials_d.json'
 TOKEN_FILE = 'token.json'
 REDIRECT_URI = 'http://localhost:8080/'   # должен совпадать с тем, что в Google Cloud
 
@@ -57,7 +57,7 @@ def add_event(summary: str, start: dt.datetime, end: dt.datetime, description: s
     return result
 
 
-if __name__ == '__main__':
-    start = dt.datetime(2026, 5, 20, 18, 0, 0)
-    end   = dt.datetime(2026, 5, 20, 19, 0, 0)
-    add_event('Тест Web Creds', start, end, 'сообщение из бота')
+# if __name__ == '__main__':
+#     start = dt.datetime(2026, 5, 20, 18, 0, 0)
+#     end   = dt.datetime(2026, 5, 20, 19, 0, 0)
+#     add_event('Тест Web Creds', start, end, 'сообщение из бота')
