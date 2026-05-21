@@ -6,8 +6,7 @@ from google_auth_oauthlib.flow import Flow
 from google_services import SCOPES
 from db import Database
 
-# REDIRECT_URI = os.environ['OAUTH_REDIRECT_URI']
-REDIRECT_URI = "https://localhost:8080/oauth2callback"
+REDIRECT_URI = os.environ['OAUTH_REDIRECT_URI']
 PUBLIC_BASE = REDIRECT_URI.rsplit('/', 1)[0]
 
 _db = Database()
@@ -38,6 +37,7 @@ def start_auth():
         include_granted_scopes='true'
     )
 
+    # print(f"(внутри неё зашит redirect_uri): {url}")
     # 3. СОХРАНЯЕМ ВЕРИФИКАТОР В СЕССИЮ БРАУЗЕРА
     session['code_verifier'] = flow.code_verifier
 
@@ -46,6 +46,7 @@ def start_auth():
 
 @app.route('/oauth2callback')
 def callback():
+    # print(f" ФАКТИЧЕСКИЙ URL КОЛБЭКА ОТ БРАУЗЕРА: {request.url}")
     state = request.args.get('state', '')
     if not state.isdigit():
         return 'bad state', 400
@@ -64,7 +65,29 @@ def callback():
     # 5. ОЧИЩАЕМ СЕССИЮ
     session.pop('code_verifier', None)
 
-    return 'Готово! Возвращайся в ВК и продолжай работу с ботом.'
+    return '<script>window.close();</script>', 200
+
+@app.route('/')
+def home():
+    return "Server is running!"
+@app.route('/mike/')
+def mike_endpoint():
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Hello World</title>
+</head>
+<body>
+
+    <!-- This script displays an alert box -->
+    <script>
+        alert("Hello, World!");
+    </script>
+
+</body>
+</html>"""
 
 def run():
-    app.run(host='0.0.0.0', port=8080, debug=False, use_reloader=False, ssl_context='adhoc')
+    app.run(host='0.0.0.0', port=7042, debug=False, use_reloader=False)
+    # app.run(host='0.0.0.0', port=7042, debug=False, use_reloader=False, ssl_context='adhoc')
