@@ -10,21 +10,28 @@ class Database:
 
     def _init(self):
         self.cur.execute('''
-        CREATE TABLE IF NOT EXISTS users 
-        (
-            user_id INTEGER PRIMARY KEY,
-            state TEXT DEFAULT 'main_menu',
-            current_subject TEXT,
-            subjects TEXT DEFAULT '[]',
-            temp_data TEXT,
-            google_creds TEXT
-        )
-                         ''')
+            CREATE TABLE IF NOT EXISTS users 
+            (
+                user_id INTEGER PRIMARY KEY,
+                state TEXT DEFAULT 'main_menu',
+                current_subject TEXT,
+                subjects TEXT DEFAULT '[]',
+                temp_data TEXT,
+                google_creds TEXT
+            )
+        ''')
 
         # для уже существующей БД
         cols = {r[1] for r in self.cur.execute("PRAGMA table_info(users)").fetchall()}
         if 'google_creds' not in cols:
             self.cur.execute('ALTER TABLE users ADD COLUMN google_creds TEXT')
+        if 'ai_persona' not in cols:
+            self.cur.execute("ALTER TABLE users ADD COLUMN ai_persona TEXT DEFAULT ''")
+        if 'ai_history' not in cols:
+            self.cur.execute("ALTER TABLE users ADD COLUMN ai_history TEXT DEFAULT '[]'")
+        if 'pending_action' not in cols:
+            self.cur.execute("ALTER TABLE users ADD COLUMN pending_action TEXT")
+
         self.conn.commit()
 
     def get_creds(self, user_id: int) -> str | None:
@@ -73,3 +80,8 @@ class Database:
                          (json.dumps(subs, ensure_ascii=False), user_id))
         self.conn.commit()
         return True
+
+    def get_ai_history(self, user_id: int) -> list[dict]:
+        self.cur.execute('SELECT ai_history FROM users WHERE user_id=?', (user_id,))
+        row = self.cur.fetchone()
+        return json.loads(row[0]) if row and row[0] else []
