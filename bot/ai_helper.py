@@ -111,8 +111,13 @@ def _normalize_action(action: dict | None) -> dict | None:
     if not action or not isinstance(action, dict):
         return None
 
+    intent = (action.get('intent') or 'none').strip()
+
+    if intent not in ('save_summary', 'create_reminder', 'show_upcoming'):
+        return None
+
     out = {
-        'intent': action.get('intent', 'none'),
+        'intent': intent,
         'confidence': float(action.get('confidence', 0) or 0),
         'subject': action.get('subject'),
         'title': action.get('title'),
@@ -122,9 +127,6 @@ def _normalize_action(action: dict | None) -> dict | None:
         'missing': action.get('missing') or [],
         'ask_user': action.get('ask_user'),
     }
-
-    if out['intent'] == 'none':
-        return None
 
     return out
 
