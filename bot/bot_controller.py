@@ -308,6 +308,43 @@ class BotController:
             V.kb_cancel()
         )
 
+    def _find_latest_note(self, pid, subject):
+        if not subject:
+            return None
+
+        cal, drive = self._services(pid)
+        notes = drive.list_notes(subject=subject)
+        return notes[0] if notes else None
+
+    def _build_reminder_description_from_note(self, pid, subject='', *, file_id=None, link=''):
+        cal, drive = self._services(pid)
+
+        note_file_id = file_id
+        note_link = (link or '').strip()
+
+        if not note_file_id:
+            note = self._find_latest_note(pid, subject)
+            if note:
+                note_file_id = note.get('id')
+                note_link = note.get('webViewLink', '') or note_link
+
+        if not note_file_id:
+            return '', None
+
+        try:
+            raw = drive.download_text(note_file_id)
+            note_summary = summarize(raw, max_chars=1200).strip()
+        except Exception:
+            note_summary = ''
+
+        parts = []
+        if note_summary:
+            parts.append(note_summary)
+        if note_link:
+            parts.append(note_link)
+
+        return '\n\n'.join(parts).strip(), note_file_id
+
     def st_selecting_subject(self, pid, text, a, v, subj, subs, temp):
         if a == 'add_subject':
             self.db.set_state(pid, 'wait_new_subject')
