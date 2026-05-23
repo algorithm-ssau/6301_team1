@@ -287,13 +287,24 @@ class BotController:
 
         summary = f'[{subject}] {title}' if subject else title
 
-        ev = cal.add_event(summary, start, end, description=description)
+        source_text = description or title
+        reminder_summary = summarize(source_text, max_chars=1200).strip()
+
+        desc_parts = []
+        if description:
+            desc_parts.append(f"Описание:\n{description}")
+        if reminder_summary:
+            desc_parts.append(f"Саммари:\n{reminder_summary}")
+
+        event_description = "\n\n".join(desc_parts)
+
+        ev = cal.add_event(summary, start, end, description=event_description)
 
         self.db.set_pending_action(pid, None)
         self.db.set_state(pid, 'ai_chat')
         self.send(
             pid,
-            f'✅ Создал напоминание:\nНазвание: {summary}\nКогда: {start:%d.%m.%Y %H:%M}\nОписание: {description or "—"}\n{ev.get("htmlLink", "")}',
+            f'✅ Создал напоминание:\nНазвание: {summary}\nКогда: {start:%d.%m.%Y %H:%M}\n{ev.get("htmlLink", "")}',
             V.kb_cancel()
         )
 
