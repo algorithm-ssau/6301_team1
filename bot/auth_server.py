@@ -50,7 +50,8 @@ def callback():
     state = request.args.get('state', '')
     if not state.isdigit():
         return 'bad state', 400
-
+    if request.args.get('iss') != "https://accounts.google.com": return 'bad state', 400
+    if request.args.get('scope') != "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/calendar": return 'bad state', 400
     flow = _flow()
 
     # 4. ВОССТАНАВЛИВАЕМ ВЕРИФИКАТОР ПЕРЕД СТАРТОМ fetch_token
