@@ -2,7 +2,7 @@ import re
 import json
 import datetime as dt
 from vk_api.utils import get_random_id
-from ai_helper import summarize, is_enabled as ai_on, trim_history, chat_reply, detect_action
+from ai_helper import summarize, is_enabled as ai_on, chat_turn, trim_history
 
 import vk_view as V
 
@@ -79,7 +79,7 @@ class BotController:
             self.show_upcoming(pid)
         elif a == 'ai_chat':
             self.db.set_state(pid, 'ai_chat')
-            self.send(pid, 'AI-чат включён. Пишите сообщением. Для выхода нажмите Отмена.', V.kb_cancel())
+            self.send(pid, 'AI-чат включён. Напишите сообщение. Для выхода нажмите «Отмена».', V.kb_cancel())
         else:
             self.send(pid, 'Пользуйся кнопками.', V.kb_main())
 
@@ -99,61 +99,63 @@ class BotController:
         history = self.db.get_ai_history(pid)
         persona = self.db.get_ai_persona(pid)
 
-        history.append({'role': 'user', 'content': text})
-        history = trim_history(history)
-        self.db.set_ai_history(pid, history)
+        turn = chat_turn(
+            text,
+            history,
+            persona=persona,
+            subjects=subs,
+            current_subject=subj,
+        )
 
-        reply = chat_reply(text, history[:-1], persona=persona)
+        reply = (turn.get('reply') or '').strip() or 'Не удалось сформировать ответ.'
+        action = turn.get('action')
 
-        history.append({'role': 'assistant', 'content': reply})
-        history = trim_history(history)
-        self.db.set_ai_history(pid, history)
+        history = history + [
+            {'role': 'user', 'content': text},
+            {'role': 'assistant', 'content': reply},
+        ]
+        self.db.set_ai_history(pid, trim_history(history))
+
+        if action and action.get('intent') in ('save_summary', 'create_reminder'):
+            confidence = float(action.get('confidence', 0) or 0)
+            missing = action.get('missing') or []
+
+            if confidence >= 0.75 and not missing:
+                self.db.set_pending_action(pid, action)
+                self.db.set_state(pid, 'ai_confirm_action')
+                self.send(pid, reply, V.kb_ai_confirm())
+                return
 
         self.send(pid, reply, V.kb_cancel())
-
-        try:
-            action = detect_action(history, subs, subj)
-        except Exception:
-            action = {'intent': 'none', 'confidence': 0.0}
-
-        if action.get('intent') == 'none' or action.get('confidence', 0) < 0.75:
-            return
-
-        missing = action.get('missing') or []
-        if missing:
-            ask_user = action.get('ask_user') or f"Нужно уточнить: {', '.join(missing)}"
-            self.send(pid, ask_user, V.kb_cancel())
-            return
-
-        self.db.set_pending_action(pid, action)
-        self.db.set_state(pid, 'ai_confirm_action')
-        self.send(pid, self._format_ai_action(action), V.kb_ai_confirm())
 
     def st_ai_confirm_action(self, pid, text, a, v, subj, subs, temp):
         if a == 'ai_reject':
             self.db.set_pending_action(pid, None)
             self.db.set_state(pid, 'ai_chat')
-            self.send(pid, 'Действие отменено.', V.kb_cancel())
+            self.send(pid, 'Хорошо, ничего не сохраняю.', V.kb_cancel())
             return
 
         if a != 'ai_confirm':
-            self.send(pid, 'Нажмите Подтвердить или Отмена.', V.kb_ai_confirm())
+            self.send(pid, 'Нажмите «Подтвердить» или «Отмена».', V.kb_ai_confirm())
             return
 
         action = self.db.get_pending_action(pid)
         if not action:
             self.db.set_state(pid, 'ai_chat')
-            self.send(pid, 'Не найдено ожидающее действие.', V.kb_cancel())
+            self.send(pid, 'Действие не найдено.', V.kb_cancel())
+            return
+
+        if action['intent'] == 'save_summary':
+            self._execute_ai_save_summary(pid, action, subj)
             return
 
         if action['intent'] == 'create_reminder':
             self._execute_ai_reminder(pid, action, subj)
-        elif action['intent'] == 'save_summary':
-            self._execute_ai_save_summary(pid, action, subj)
-        else:
-            self.send(pid, 'Неизвестное действие.', V.kb_cancel())
-            self.db.set_state(pid, 'ai_chat')
-            self.db.set_pending_action(pid, None)
+            return
+
+        self.db.set_pending_action(pid, None)
+        self.db.set_state(pid, 'ai_chat')
+        self.send(pid, 'Неизвестное действие.', V.kb_cancel())
 
     def _format_ai_action(self, action: dict) -> str:
         if action['intent'] == 'create_reminder':
@@ -215,24 +217,23 @@ class BotController:
         self.send(pid, f'✅ Напоминание создано:\n{start:%d.%m.%Y %H:%M}\n{ev.get("htmlLink", "")}', V.kb_cancel())
 
     def _execute_ai_save_summary(self, pid, action, current_subject):
-        import datetime as dt
-
         cal, drive = self._services(pid)
 
-        subject = action.get('subject') or current_subject
+        subject = (action.get('subject') or current_subject or '').strip()
         if not subject:
             self.db.set_pending_action(pid, None)
             self.db.set_state(pid, 'ai_chat')
-            self.send(pid, 'Не указан предмет. Сначала выберите предмет вручную или напишите его в сообщении.',
+            self.send(pid, 'Не вижу предмета. Напишите его в сообщении или сначала выберите предмет вручную.',
                       V.kb_cancel())
             return
 
-        title = action.get('title') or 'Конспект'
-        content = action.get('content') or ''
-        if not content.strip():
+        title = (action.get('title') or 'Конспект').strip()
+        content = (action.get('content') or '').strip()
+
+        if not content:
             self.db.set_pending_action(pid, None)
             self.db.set_state(pid, 'ai_chat')
-            self.send(pid, 'Пустой текст конспекта — нечего сохранять.', V.kb_cancel())
+            self.send(pid, 'Текст конспекта получился пустым, сохранять нечего.', V.kb_cancel())
             return
 
         date_str = dt.datetime.now().strftime('%d.%m.%Y')
@@ -248,7 +249,7 @@ class BotController:
 
         self.db.set_pending_action(pid, None)
         self.db.set_state(pid, 'ai_chat')
-        self.send(pid, f'✅ Конспект сохранён:\n{link}', V.kb_cancel())
+        self.send(pid, f'✅ Сохранил конспект:\n{link}', V.kb_cancel())
 
     def st_selecting_subject(self, pid, text, a, v, subj, subs, temp):
         if a == 'add_subject':
