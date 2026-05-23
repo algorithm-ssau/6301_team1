@@ -489,7 +489,7 @@ class BotController:
                 try:
                     raw = drive.download_text(fid)
                     body = summarize(raw)
-                    prefix = '🤖 Краткий пересказ:' if ai_on() else '📝 Текст конспекта:'
+                    prefix = 'Краткий пересказ:' if ai_on() else '📝 Текст конспекта:'
                     msg = f"⏰ {summary}\n🕒 {start}\n\n{prefix}\n{body}"
                 except Exception as e:
                     extra = f"\n\nОписание:\n{description}" if description else ''
