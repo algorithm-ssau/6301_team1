@@ -474,39 +474,30 @@ class BotController:
 
     def _create_reminder(self, pid, subject, temp):
         _, _, _, temp = self.db.get_user(pid)
+
         start = dt.datetime(temp['year'], temp['month'], temp['day'],
                             temp['hour'], temp['minute'])
         end = start + dt.timedelta(hours=1)
 
         title = temp.get('title', 'Конспект')
-        link = temp.get('link', '')
         file_id = temp.get('file_id')
+        link = temp.get('link', '')
 
         summary = f"[{subject}] {title}"
+        description, drive_file_id = self._build_reminder_description_from_note(
+            pid,
+            subject,
+            file_id=file_id,
+            link=link,
+        )
 
         cal, drive = self._services(pid)
-
-        desc_parts = []
-        if link:
-            desc_parts.append(f"Конспект: {link}")
-
-        if file_id:
-            try:
-                raw = drive.download_text(file_id)
-                note_summary = summarize(raw, max_chars=1200).strip()
-                if note_summary:
-                    desc_parts.append(f"Саммари:\n{note_summary}")
-            except Exception:
-                pass
-
-        desc = "\n\n".join(desc_parts)
-
         ev = cal.add_event(
             summary,
             start,
             end,
-            description=desc,
-            drive_file_id=file_id
+            description=description,
+            drive_file_id=drive_file_id,
         )
 
         self.send_main(
