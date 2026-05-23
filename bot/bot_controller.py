@@ -180,45 +180,6 @@ class BotController:
         return "Подтвердить действие?"
 
     def _execute_ai_reminder(self, pid, action, current_subject):
-        import datetime as dt
-        from dateparser import parse as dp_parse
-
-        cal, drive = self._services(pid)
-
-        when_text = action.get('when_text')
-        start = dp_parse(
-            when_text,
-            languages=['ru'],
-            settings={
-                'TIMEZONE': 'Europe/Samara',
-                'RETURN_AS_TIMEZONE_AWARE': False,
-                'PREFER_DATES_FROM': 'future',
-            }
-        )
-        if not start:
-            self.db.set_state(pid, 'ai_chat')
-            self.db.set_pending_action(pid, None)
-            self.send(pid, 'Не смог понять дату/время. Напишите точнее, например: 25.05.2026 18:30', V.kb_cancel())
-            return
-
-        end = start + dt.timedelta(hours=1)
-
-        subject = action.get('subject') or current_subject
-        title = action.get('title') or 'Напоминание'
-        if subject:
-            summary = f'[{subject}] {title}'
-        else:
-            summary = title
-
-        description = action.get('description') or ''
-
-        ev = cal.add_event(summary, start, end, description=description)
-
-        self.db.set_pending_action(pid, None)
-        self.db.set_state(pid, 'ai_chat')
-        self.send(pid, f'✅ Напоминание создано:\n{start:%d.%m.%Y %H:%M}\n{ev.get("htmlLink", "")}', V.kb_cancel())
-
-    def _execute_ai_reminder(self, pid, action, current_subject):
         cal, drive = self._services(pid)
 
         when_text = (action.get('when_text') or '').strip()
