@@ -111,3 +111,4 @@ class Database:
         val = json.dumps(data, ensure_ascii=False) if data else None
         self.cur.execute('UPDATE users SET pending_action=? WHERE user_id=?', (val, user_id))
         self.conn.commit()
+
