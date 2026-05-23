@@ -215,6 +215,20 @@ class BotController:
                       V.kb_cancel())
             return
 
+        # если предмета нет у пользователя — создаём
+        _, _, subs, _ = self.db.get_user(pid)
+        existing_map = {s.casefold(): s for s in subs}
+        real_subject = existing_map.get(subject.casefold())
+
+        if real_subject is None:
+            self.db.add_subject(pid, subject)
+            real_subject = subject
+        else:
+            real_subject = existing_map[subject.casefold()]
+
+        # делаем его текущим выбранным предметом
+        self.db.set_subject(pid, real_subject)
+
         title = (action.get('title') or 'Конспект').strip()
         content = (action.get('content') or '').strip()
 
@@ -225,10 +239,10 @@ class BotController:
             return
 
         date_str = dt.datetime.now().strftime('%d.%m.%Y')
-        filename = f"[{subject}] {_safe_filename(title)}.md"
+        filename = f"[{real_subject}] {_safe_filename(title)}.md"
         body = (
             f"Название: {title}\n"
-            f"Предмет: {subject}\n"
+            f"Предмет: {real_subject}\n"
             f"Дата: {date_str}\n\n"
             f"Конспект:\n{content}"
         )
