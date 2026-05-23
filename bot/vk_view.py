@@ -18,6 +18,13 @@ def kb_main():
     kb.add_button('AI чат', color=VkKeyboardColor.SECONDARY, payload={'a': 'ai_chat'})
     return kb
 
+def kb_ai_confirm():
+    kb = VkKeyboard(one_time=False)
+    kb.add_button('Подтвердить', color=VkKeyboardColor.POSITIVE, payload={'a': 'ai_confirm'})
+    kb.add_line()
+    kb.add_button('Отмена', color=VkKeyboardColor.NEGATIVE, payload={'a': 'ai_reject'})
+    return kb
+
 
 def kb_subjects(subjects: list[str]):
     kb = VkKeyboard(one_time=False)
