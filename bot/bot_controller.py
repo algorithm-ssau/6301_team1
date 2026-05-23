@@ -129,6 +129,26 @@ class BotController:
         self.db.set_state(pid, 'ai_confirm_action')
         self.send(pid, self._format_ai_action(action), V.kb_ai_confirm())
 
+    def _format_ai_action(self, action: dict) -> str:
+        if action['intent'] == 'create_reminder':
+            return (
+                "AI распознал создание напоминания:\n\n"
+                f"Название: {action.get('title') or 'Без названия'}\n"
+                f"Когда: {action.get('when_text')}\n"
+                f"Описание: {action.get('description') or '-'}\n\n"
+                "Подтвердить?"
+            )
+        if action['intent'] == 'save_summary':
+            preview = (action.get('content') or '')[:400]
+            return (
+                "AI распознал сохранение конспекта:\n\n"
+                f"Предмет: {action.get('subject') or 'не указан'}\n"
+                f"Название: {action.get('title') or 'Без названия'}\n"
+                f"Текст:\n{preview}\n\n"
+                "Подтвердить?"
+            )
+        return "Подтвердить действие?"
+
     def st_selecting_subject(self, pid, text, a, v, subj, subs, temp):
         if a == 'add_subject':
             self.db.set_state(pid, 'wait_new_subject')
