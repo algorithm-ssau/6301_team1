@@ -221,7 +221,7 @@ class BotController:
         if not content:
             self.db.set_pending_action(pid, None)
             self.db.set_state(pid, 'ai_chat')
-            self.send(pid, 'Текст конспекта получился пустым, сохранять нечего.', V.kb_cancel())
+            self.send(pid, 'Не вижу текста конспекта. Пришлите текст, который нужно сохранить.', V.kb_cancel())
             return
 
         date_str = dt.datetime.now().strftime('%d.%m.%Y')
@@ -279,7 +279,7 @@ class BotController:
         self.db.set_state(pid, 'ai_chat')
         self.send(
             pid,
-            f'✅ Напоминание создано на {start:%d.%m.%Y %H:%M}\n{ev.get("htmlLink", "")}',
+            f'✅ Создал напоминание:\nНазвание: {summary}\nКогда: {start:%d.%m.%Y %H:%M}\nОписание: {description or "—"}\n{ev.get("htmlLink", "")}',
             V.kb_cancel()
         )
 
