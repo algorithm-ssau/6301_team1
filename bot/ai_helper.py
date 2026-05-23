@@ -1,42 +1,227 @@
 import os
 import json
+import re
+
 from openai import OpenAI
 
 AI_API_KEY = os.environ.get('AI_API_KEY', '')
 AI_BASE_URL = os.environ.get('AI_BASE_URL', 'https://openai.bothub.chat/v1')
-AI_MODEL = os.environ.get('AI_MODEL', 'gpt-4.5-mini')
+AI_MODEL = os.environ.get('AI_MODEL', 'gpt-5.4-mini')
 
-client = OpenAI(api_key=AI_API_KEY, base_url=AI_BASE_URL) if AI_API_KEY else None
+client = OpenAI(
+    api_key=AI_API_KEY,
+    base_url=AI_BASE_URL,
+) if AI_API_KEY else None
 
 BASE_IDENTITY = (
     "Ты — Эдельвейз. Интеллектуальный помощник для обучения. "
     "Отвечай вежливо, ясно и полезно. "
-    "Если задан стиль персонажа, используй только стиль речи, "
-    "но не выдумывай лишние факты о себе."
+    "Если задан стиль персонажа, он влияет только на манеру речи, "
+    "но не меняет факты, логику и правила работы."
 )
+
+VK_STYLE_RULES = (
+    "Пиши обычным текстом для VK. "
+    "Не используй markdown и html. "
+    "Запрещены: #, ##, **, __, *, `, ``` . "
+    "Не делай markdown-списки. "
+    "Если нужен список, используй строки с символом • или —. "
+    "Не используй технические формулировки вроде "
+    "'AI распознал', 'intent', 'JSON', 'системное действие', "
+    "'распознано намерение'."
+)
+
 
 def is_enabled() -> bool:
     return client is not None
 
+
+def _truncate(text: str, n: int) -> str:
+    return text if len(text) <= n else text[:n] + '\n…(обрезано)'
+
+
 def trim_history(messages: list[dict], max_messages: int = 10, max_chars: int = 4000) -> list[dict]:
     out = []
     total = 0
+
     for msg in reversed(messages[-max_messages:]):
         content = msg.get('content', '') or ''
         ln = len(content)
+
         if out and total + ln > max_chars:
             break
-        out.append(msg)
+
+        out.append({
+            'role': msg.get('role', 'user'),
+            'content': content
+        })
         total += ln
+
     return list(reversed(out))
 
-def chat_reply(user_text: str, history: list[dict], persona: str = '') -> str:
-    if not is_enabled():
-        return '⚠️ AI не настроен.'
 
-    system = BASE_IDENTITY
-    if persona:
-        system += f"\n\nСтиль персонажа:\n{persona}"
+def vk_plain_text(text: str) -> str:
+    if not text:
+        return ''
+
+    text = text.strip()
+
+    # убрать code fences
+    text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\s*```$', '', text)
+
+    # заголовки markdown
+    text = re.sub(r'^\s{0,3}#{1,6}\s*', '', text, flags=re.MULTILINE)
+
+    # жирный / курсив / inline code
+    text = text.replace('**', '')
+    text = text.replace('__', '')
+    text = text.replace('`', '')
+
+    # markdown bullets -> обычные bullets
+    text = re.sub(r'^\s*[-*]\s+', '• ', text, flags=re.MULTILINE)
+
+    # лишние пустые строки
+    text = re.sub(r'\n{3,}', '\n\n', text)
+
+    return text.strip()
+
+
+def _extract_json(raw: str) -> dict:
+    raw = (raw or '').strip()
+
+    if raw.startswith('```'):
+        raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.IGNORECASE)
+        raw = re.sub(r'\s*```$', '', raw)
+
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+
+    start = raw.find('{')
+    end = raw.rfind('}')
+    if start != -1 and end != -1 and end > start:
+        return json.loads(raw[start:end + 1])
+
+    raise ValueError('JSON not found')
+
+
+def _normalize_action(action: dict | None) -> dict | None:
+    if not action or not isinstance(action, dict):
+        return None
+
+    out = {
+        'intent': action.get('intent', 'none'),
+        'confidence': float(action.get('confidence', 0) or 0),
+        'subject': action.get('subject'),
+        'title': action.get('title'),
+        'content': action.get('content'),
+        'when_text': action.get('when_text'),
+        'description': action.get('description'),
+        'missing': action.get('missing') or [],
+        'ask_user': action.get('ask_user'),
+    }
+
+    if out['intent'] == 'none':
+        return None
+
+    return out
+
+
+def chat_turn(
+    user_text: str,
+    history: list[dict],
+    *,
+    persona: str = '',
+    subjects: list[str] | None = None,
+    current_subject: str | None = None,
+) -> dict:
+    """
+    Один вызов модели:
+    - формирует естественный ответ пользователю
+    - при необходимости прикладывает structured action
+    """
+    if not is_enabled():
+        return {
+            'reply': '⚠️ AI не настроен.',
+            'action': None,
+        }
+
+    subjects = subjects or []
+
+    system = f"""
+{BASE_IDENTITY}
+
+{VK_STYLE_RULES}
+
+Контекст пользователя:
+- Текущий выбранный предмет: {current_subject or "не выбран"}
+- Список предметов: {", ".join(subjects) if subjects else "пусто"}
+
+Твоя задача:
+1) Ответить пользователю естественно.
+2) Понять, хочет ли он:
+   - сохранить конспект / summary / заметку
+   - создать напоминание / событие / запись в календарь
+
+Верни строго JSON такого вида:
+{{
+  "reply": "готовый текст ответа пользователю",
+  "action": null
+}}
+
+или
+
+{{
+  "reply": "готовый текст ответа пользователю",
+  "action": {{
+    "intent": "save_summary|create_reminder",
+    "confidence": 0.0,
+    "subject": null,
+    "title": null,
+    "content": null,
+    "when_text": null,
+    "description": null,
+    "missing": [],
+    "ask_user": null
+  }}
+}}
+
+Правила:
+- reply — это единственный текст, который увидит пользователь.
+- reply должен быть естественным, без технических пояснений.
+- Не пиши фразы вроде: "AI распознал", "намерение", "intent", "JSON", "системное действие".
+- Если пользователь явно хочет сохранить конспект, reply должен уже мягко включать предложение сохранения.
+  Пример тона:
+  "Если хотите, я могу сохранить это как конспект в таком виде:
+  Предмет: ...
+  Название: ...
+  Текст:
+  ...
+  Сохранить?"
+- Если пользователь явно хочет создать напоминание, reply должен уже мягко включать предложение создать его.
+  Пример:
+  "Если хотите, я могу поставить напоминание в таком виде:
+  Название: ...
+  Когда: ...
+  Описание: ...
+  Создать?"
+- Если данных не хватает, не предлагай подтверждение. Вместо этого естественно уточни недостающие детали.
+  В action тогда укажи missing и ask_user.
+- Если действия нет, верни action = null.
+- Для save_summary:
+  - subject бери из сообщения, а если его нет — из текущего предмета, если это уместно.
+  - title сделай коротким и понятным.
+  - content должен содержать именно тот текст, который предлагается сохранить.
+- Для create_reminder:
+  - when_text оставляй как естественную русскую фразу, например "завтра в 18:00".
+  - title — короткий заголовок.
+- reply должен быть без markdown.
+
+Стиль персонажа:
+{persona or "нейтральный вежливый стиль"}
+""".strip()
 
     messages = [{'role': 'system', 'content': system}]
     messages += trim_history(history)
@@ -44,68 +229,41 @@ def chat_reply(user_text: str, history: list[dict], persona: str = '') -> str:
 
     resp = client.chat.completions.create(
         model=AI_MODEL,
-        temperature=0.7,
+        temperature=0.5,
         messages=messages,
     )
-    return (resp.choices[0].message.content or '').strip()
 
-def detect_action(history: list[dict], subjects: list[str], current_subject: str | None) -> dict:
-    if not is_enabled():
-        return {'intent': 'none', 'confidence': 0.0}
-
-    prompt = f"""
-        Ты анализируешь диалог и должен вернуть только JSON.
-        
-        Определи, есть ли намерение:
-        1) создать напоминание в календаре
-        2) сохранить конспект/summary по предмету
-        
-        Текущий предмет: {current_subject}
-        Список предметов: {subjects}
-        
-        Верни JSON строго такого вида:
-        {{
-          "intent": "none|create_reminder|save_summary",
-          "confidence": 0.0,
-          "subject": null,
-          "title": null,
-          "content": null,
-          "when_text": null,
-          "description": null,
-          "missing": [],
-          "ask_user": null
-        }}
-        
-        Правила:
-        - intent = "none", если явного запроса нет.
-        - create_reminder: когда пользователь просит напомнить, записать, поставить напоминание, событие.
-        - save_summary: когда пользователь просит сохранить конспект, заметку, summary, запись по предмету.
-        - subject бери из текущего предмета, если он очевиден и в сообщениях не указан другой.
-        - when_text оставляй в естественном русском виде, например "завтра в 18:00".
-        - если данных не хватает, укажи missing и ask_user.
-        - Верни только JSON, без пояснений.
-    """
-
-    messages = [
-        {'role': 'system', 'content': prompt},
-        *trim_history(history)
-    ]
-
-    resp = client.chat.completions.create(
-        model=AI_MODEL,
-        temperature=0,
-        messages=messages,
-    )
     raw = (resp.choices[0].message.content or '').strip()
-    return json.loads(raw)
+
+    try:
+        data = _extract_json(raw)
+        reply = vk_plain_text(data.get('reply', '')).strip()
+        action = _normalize_action(data.get('action'))
+
+        if not reply:
+            reply = 'Не удалось сформировать ответ.'
+
+        return {
+            'reply': reply,
+            'action': action,
+        }
+    except Exception:
+        # fallback: если модель вдруг вернула обычный текст
+        return {
+            'reply': vk_plain_text(raw) or 'Не удалось сформировать ответ.',
+            'action': None,
+        }
+
 
 def summarize(text: str, *, max_chars: int = 3500) -> str:
     if not is_enabled():
-        return text if len(text) <= max_chars else text[:max_chars] + '\n…(обрезано)'
+        return vk_plain_text(_truncate(text, max_chars))
 
     prompt = (
         "Сделай краткий полезный пересказ учебного конспекта. "
-        "Выдели основные идеи, определения и важные пункты."
+        "Пиши обычным текстом для VK. "
+        "Без markdown, без #, без **, без code block. "
+        "Если нужен список, используй •."
     )
 
     resp = client.chat.completions.create(
@@ -113,7 +271,8 @@ def summarize(text: str, *, max_chars: int = 3500) -> str:
         temperature=0.3,
         messages=[
             {'role': 'system', 'content': prompt},
-            {'role': 'user', 'content': text[:12000]}
+            {'role': 'user', 'content': text[:12000]},
         ],
     )
-    return (resp.choices[0].message.content or '').strip()
+
+    return vk_plain_text((resp.choices[0].message.content or '').strip())
