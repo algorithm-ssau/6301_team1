@@ -2,7 +2,7 @@ import re
 import json
 import datetime as dt
 from vk_api.utils import get_random_id
-from ai_helper import summarize, is_enabled as ai_on
+from ai_helper import summarize, is_enabled as ai_on, trim_history, chat_reply, detect_action
 
 import vk_view as V
 
@@ -82,6 +82,52 @@ class BotController:
             self.send(pid, 'AI-чат включён. Пишите сообщением. Для выхода нажмите Отмена.', V.kb_cancel())
         else:
             self.send(pid, 'Пользуйся кнопками.', V.kb_main())
+
+    def st_ai_chat(self, pid, text, a, v, subj, subs, temp):
+        if a == 'cancel':
+            self.send_main(pid, 'Выход из AI-чата.')
+            return
+
+        if not text:
+            self.send(pid, 'Напишите сообщение.', V.kb_cancel())
+            return
+
+        if not ai_on():
+            self.send(pid, 'AI сейчас не настроен.', V.kb_cancel())
+            return
+
+        history = self.db.get_ai_history(pid)
+        persona = self.db.get_ai_persona(pid)
+
+        history.append({'role': 'user', 'content': text})
+        history = trim_history(history)
+        self.db.set_ai_history(pid, history)
+
+        reply = chat_reply(text, history[:-1], persona=persona)
+
+        history.append({'role': 'assistant', 'content': reply})
+        history = trim_history(history)
+        self.db.set_ai_history(pid, history)
+
+        self.send(pid, reply, V.kb_cancel())
+
+        try:
+            action = detect_action(history, subs, subj)
+        except Exception:
+            action = {'intent': 'none', 'confidence': 0.0}
+
+        if action.get('intent') == 'none' or action.get('confidence', 0) < 0.75:
+            return
+
+        missing = action.get('missing') or []
+        if missing:
+            ask_user = action.get('ask_user') or f"Нужно уточнить: {', '.join(missing)}"
+            self.send(pid, ask_user, V.kb_cancel())
+            return
+
+        self.db.set_pending_action(pid, action)
+        self.db.set_state(pid, 'ai_confirm_action')
+        self.send(pid, self._format_ai_action(action), V.kb_ai_confirm())
 
     def st_selecting_subject(self, pid, text, a, v, subj, subs, temp):
         if a == 'add_subject':
