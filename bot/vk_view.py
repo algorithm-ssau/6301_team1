@@ -15,6 +15,7 @@ def kb_main():
     kb.add_button('Предметы', color=VkKeyboardColor.PRIMARY, payload={'a': 'subjects'})
     kb.add_line()
     kb.add_button('Что скоро?', color=VkKeyboardColor.POSITIVE, payload={'a': 'upcoming'})
+    kb.add_button('AI чат', color=VkKeyboardColor.SECONDARY, payload={'a': 'ai_chat'})
     return kb
 
 
