@@ -92,3 +92,12 @@ class Database:
             (json.dumps(history, ensure_ascii=False), user_id)
         )
         self.conn.commit()
+
+    def get_ai_persona(self, user_id: int) -> str:
+        self.cur.execute('SELECT ai_persona FROM users WHERE user_id=?', (user_id,))
+        row = self.cur.fetchone()
+        return row[0] if row and row[0] else ''
+
+    def set_ai_persona(self, user_id: int, persona: str):
+        self.cur.execute('UPDATE users SET ai_persona=? WHERE user_id=?', (persona, user_id))
+        self.conn.commit()
