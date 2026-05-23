@@ -85,3 +85,10 @@ class Database:
         self.cur.execute('SELECT ai_history FROM users WHERE user_id=?', (user_id,))
         row = self.cur.fetchone()
         return json.loads(row[0]) if row and row[0] else []
+
+    def set_ai_history(self, user_id: int, history: list[dict]):
+        self.cur.execute(
+            'UPDATE users SET ai_history=? WHERE user_id=?',
+            (json.dumps(history, ensure_ascii=False), user_id)
+        )
+        self.conn.commit()
