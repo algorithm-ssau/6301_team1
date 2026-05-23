@@ -179,6 +179,41 @@ class BotController:
             )
         return "Подтвердить действие?"
 
+    def _execute_ai_save_summary(self, pid, action, current_subject):
+        cal, drive = self._services(pid)
+
+        subject = (action.get('subject') or current_subject or '').strip()
+        if not subject:
+            self.db.set_pending_action(pid, None)
+            self.db.set_state(pid, 'ai_chat')
+            self.send(pid, 'Не вижу предмета. Напишите его в сообщении или сначала выберите предмет вручную.',
+                      V.kb_cancel())
+            return
+
+        title = (action.get('title') or 'Конспект').strip()
+        content = (action.get('content') or '').strip()
+
+        if not content:
+            self.db.set_pending_action(pid, None)
+            self.db.set_state(pid, 'ai_chat')
+            self.send(pid, 'Текст конспекта получился пустым, сохранять нечего.', V.kb_cancel())
+            return
+
+        date_str = dt.datetime.now().strftime('%d.%m.%Y')
+        filename = f"[{subject}] {_safe_filename(title)}.md"
+        body = (
+            f"Название: {title}\n"
+            f"Предмет: {subject}\n"
+            f"Дата: {date_str}\n\n"
+            f"Конспект:\n{content}"
+        )
+
+        fid, link = drive.upload_note(filename, body)
+
+        self.db.set_pending_action(pid, None)
+        self.db.set_state(pid, 'ai_chat')
+        self.send(pid, f'✅ Сохранил конспект:\n{link}', V.kb_cancel())
+
     def _execute_ai_reminder(self, pid, action, current_subject):
         cal, drive = self._services(pid)
 
@@ -414,20 +449,33 @@ class BotController:
     def show_upcoming(self, pid):
         cal, drive = self._services(pid)
         events = cal.list_upcoming(days=7)
-        events = [e for e in events if cal.get_drive_id(e)]
+
         if not events:
-            self.send(pid, 'Ближайших напоминаний нет.', V.kb_main()); return
+            self.send(pid, 'Ближайших напоминаний нет.', V.kb_main())
+            return
+
         for ev in events[:5]:
-            start = ev['start'].get('dateTime', ev['start'].get('date'))
-            fid = self.cal_helper.get_drive_id(ev) if False else None  # см. ниже
-            fid = ev.get('extendedProperties', {}).get('private', {}).get('driveFileId')
-            try:
-                raw = drive.download_text(fid)
-                body = summarize(raw)
-            except Exception as e:
-                body = f'(не удалось получить файл: {e})'
-            prefix = '🤖 Краткий пересказ:' if ai_on() else '📝 Текст конспекта:'
-            self.send(pid,
-                      f"⏰ {ev.get('summary', '')}\n🕒 {start}\n\n{prefix}\n{body}")
+            start = ev.get('start', {}).get('dateTime') or ev.get('start', {}).get('date') or ''
+            summary = ev.get('summary', 'Без названия')
+            description = (ev.get('description') or '').strip()
+
+            fid = cal.get_drive_id(ev)
+
+            if fid:
+                try:
+                    raw = drive.download_text(fid)
+                    body = summarize(raw)
+                    prefix = 'Краткий пересказ:' if ai_on() else '📝 Текст конспекта:'
+                    msg = f"⏰ {summary}\n🕒 {start}\n\n{prefix}\n{body}"
+                except Exception as e:
+                    extra = f"\n\nОписание:\n{description}" if description else ''
+                    msg = f"⏰ {summary}\n🕒 {start}{extra}\n\n(не удалось получить файл: {e})"
+            else:
+                extra = f"\n\nОписание:\n{description}" if description else ''
+                msg = f"⏰ {summary}\n🕒 {start}{extra}"
+
+            self.send(pid, msg)
+
         self.send(pid, 'Главное меню:', V.kb_main())
         self.db.set_state(pid, 'main_menu')
+
