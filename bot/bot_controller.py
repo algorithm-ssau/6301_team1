@@ -469,12 +469,13 @@ class BotController:
         self.send(pid, txt, V.kb_subject_actions())
 
     # ---- что скоро ----
-    def show_upcoming(self, pid):
+    def show_upcoming(self, pid, *, keep_state='main_menu', final_text='Главное меню:', final_kb=None):
         cal, drive = self._services(pid)
         events = cal.list_upcoming(days=7)
 
         if not events:
-            self.send(pid, 'Ближайших напоминаний нет.', V.kb_main())
+            self.db.set_state(pid, keep_state)
+            self.send(pid, 'Ближайших напоминаний нет.', final_kb or V.kb_main())
             return
 
         for ev in events[:5]:
@@ -488,7 +489,7 @@ class BotController:
                 try:
                     raw = drive.download_text(fid)
                     body = summarize(raw)
-                    prefix = 'Краткий пересказ:' if ai_on() else '📝 Текст конспекта:'
+                    prefix = '🤖 Краткий пересказ:' if ai_on() else '📝 Текст конспекта:'
                     msg = f"⏰ {summary}\n🕒 {start}\n\n{prefix}\n{body}"
                 except Exception as e:
                     extra = f"\n\nОписание:\n{description}" if description else ''
@@ -499,6 +500,7 @@ class BotController:
 
             self.send(pid, msg)
 
-        self.send(pid, 'Главное меню:', V.kb_main())
-        self.db.set_state(pid, 'main_menu')
+        self.db.set_state(pid, keep_state)
+        self.send(pid, final_text, final_kb or V.kb_main())
+
 
