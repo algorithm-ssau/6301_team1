@@ -112,7 +112,6 @@ class BotController:
         reply = (turn.get('reply') or '').strip()
         action = turn.get('action')
 
-        # 1. ИИ сам распознал запрос ближайших событий
         if action and action.get('intent') == 'show_upcoming':
             confidence = float(action.get('confidence', 0) or 0)
 
@@ -121,7 +120,7 @@ class BotController:
                 new_history.append({'role': 'assistant', 'content': reply})
             self.db.set_ai_history(pid, trim_history(new_history))
 
-            if confidence >= 0.70:
+            if confidence >= 0.60:
                 if reply:
                     self.send(pid, reply)
                 self.show_upcoming(
@@ -132,7 +131,6 @@ class BotController:
                 )
                 return
 
-        # 2. Обычная запись истории
         reply = reply or 'Не удалось сформировать ответ.'
         history = history + [
             {'role': 'user', 'content': text},
@@ -140,12 +138,16 @@ class BotController:
         ]
         self.db.set_ai_history(pid, trim_history(history))
 
-        # 3. Подтверждаемые действия
         if action and action.get('intent') in ('save_summary', 'create_reminder'):
             confidence = float(action.get('confidence', 0) or 0)
             missing = action.get('missing') or []
 
-            if confidence >= 0.75 and not missing:
+            if action.get('intent') == 'save_summary':
+                content = (action.get('content') or '').strip()
+                if not content:
+                    missing = list(set(missing + ['content']))
+
+            if confidence >= 0.60 and not missing:
                 self.db.set_pending_action(pid, action)
                 self.db.set_state(pid, 'ai_confirm_action')
                 self.send(pid, reply, V.kb_ai_confirm())
