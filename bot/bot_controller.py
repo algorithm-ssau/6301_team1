@@ -214,6 +214,42 @@ class BotController:
         self.db.set_state(pid, 'ai_chat')
         self.send(pid, f'✅ Напоминание создано:\n{start:%d.%m.%Y %H:%M}\n{ev.get("htmlLink", "")}', V.kb_cancel())
 
+    def _execute_ai_save_summary(self, pid, action, current_subject):
+        import datetime as dt
+
+        cal, drive = self._services(pid)
+
+        subject = action.get('subject') or current_subject
+        if not subject:
+            self.db.set_pending_action(pid, None)
+            self.db.set_state(pid, 'ai_chat')
+            self.send(pid, 'Не указан предмет. Сначала выберите предмет вручную или напишите его в сообщении.',
+                      V.kb_cancel())
+            return
+
+        title = action.get('title') or 'Конспект'
+        content = action.get('content') or ''
+        if not content.strip():
+            self.db.set_pending_action(pid, None)
+            self.db.set_state(pid, 'ai_chat')
+            self.send(pid, 'Пустой текст конспекта — нечего сохранять.', V.kb_cancel())
+            return
+
+        date_str = dt.datetime.now().strftime('%d.%m.%Y')
+        filename = f"[{subject}] {_safe_filename(title)}.md"
+        body = (
+            f"Название: {title}\n"
+            f"Предмет: {subject}\n"
+            f"Дата: {date_str}\n\n"
+            f"Конспект:\n{content}"
+        )
+
+        fid, link = drive.upload_note(filename, body)
+
+        self.db.set_pending_action(pid, None)
+        self.db.set_state(pid, 'ai_chat')
+        self.send(pid, f'✅ Конспект сохранён:\n{link}', V.kb_cancel())
+
     def st_selecting_subject(self, pid, text, a, v, subj, subs, temp):
         if a == 'add_subject':
             self.db.set_state(pid, 'wait_new_subject')
