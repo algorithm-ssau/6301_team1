@@ -101,3 +101,13 @@ class Database:
     def set_ai_persona(self, user_id: int, persona: str):
         self.cur.execute('UPDATE users SET ai_persona=? WHERE user_id=?', (persona, user_id))
         self.conn.commit()
+
+    def get_pending_action(self, user_id: int):
+        self.cur.execute('SELECT pending_action FROM users WHERE user_id=?', (user_id,))
+        row = self.cur.fetchone()
+        return json.loads(row[0]) if row and row[0] else None
+
+    def set_pending_action(self, user_id: int, data):
+        val = json.dumps(data, ensure_ascii=False) if data else None
+        self.cur.execute('UPDATE users SET pending_action=? WHERE user_id=?', (val, user_id))
+        self.conn.commit()
