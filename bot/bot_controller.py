@@ -283,22 +283,17 @@ class BotController:
 
         subject = (action.get('subject') or current_subject or '').strip()
         title = (action.get('title') or 'Напоминание').strip()
-        description = (action.get('description') or '').strip()
 
         summary = f'[{subject}] {title}' if subject else title
+        description, drive_file_id = self._build_reminder_description_from_note(pid, subject)
 
-        source_text = description or title
-        reminder_summary = summarize(source_text, max_chars=1200).strip()
-
-        desc_parts = []
-        if description:
-            desc_parts.append(f"Описание:\n{description}")
-        if reminder_summary:
-            desc_parts.append(f"Саммари:\n{reminder_summary}")
-
-        event_description = "\n\n".join(desc_parts)
-
-        ev = cal.add_event(summary, start, end, description=event_description)
+        ev = cal.add_event(
+            summary,
+            start,
+            end,
+            description=description,
+            drive_file_id=drive_file_id,
+        )
 
         self.db.set_pending_action(pid, None)
         self.db.set_state(pid, 'ai_chat')
