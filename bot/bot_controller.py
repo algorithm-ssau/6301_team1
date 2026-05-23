@@ -429,16 +429,43 @@ class BotController:
         start = dt.datetime(temp['year'], temp['month'], temp['day'],
                             temp['hour'], temp['minute'])
         end = start + dt.timedelta(hours=1)
+
         title = temp.get('title', 'Конспект')
         link = temp.get('link', '')
+        file_id = temp.get('file_id')
+
         summary = f"[{subject}] {title}"
-        desc = f"Конспект: {link}" if link else ''
+
         cal, drive = self._services(pid)
-        ev = cal.add_event(summary, start, end, description=desc,
-                                drive_file_id=temp.get('file_id'))
-        self.send_main(pid,
-                       f"✅ Напоминание создано на {start:%d.%m.%Y %H:%M}\n"
-                       f"{ev.get('htmlLink', '')}")
+
+        desc_parts = []
+        if link:
+            desc_parts.append(f"Конспект: {link}")
+
+        if file_id:
+            try:
+                raw = drive.download_text(file_id)
+                note_summary = summarize(raw, max_chars=1200).strip()
+                if note_summary:
+                    desc_parts.append(f"Саммари:\n{note_summary}")
+            except Exception:
+                pass
+
+        desc = "\n\n".join(desc_parts)
+
+        ev = cal.add_event(
+            summary,
+            start,
+            end,
+            description=desc,
+            drive_file_id=file_id
+        )
+
+        self.send_main(
+            pid,
+            f"✅ Напоминание создано на {start:%d.%m.%Y %H:%M}\n"
+            f"{ev.get('htmlLink', '')}"
+        )
 
     # ---- поиск ----
     def st_search_menu(self, pid, text, a, v, subj, subs, temp):
