@@ -547,37 +547,43 @@ class BotController:
 
     # ---- что скоро ----
     def show_upcoming(self, pid, *, keep_state='main_menu', final_text='Главное меню:', final_kb=None):
-        cal, drive = self._services(pid)
-        events = cal.list_upcoming(days=7)
+        try:
+            cal, drive = self._services(pid)
+            events = cal.list_upcoming(days=7)
+        except Exception as e:
+            self.db.set_state(pid, keep_state)
+            self.send(pid, f'Не удалось получить события: {e}', final_kb or V.kb_main())
+            return
 
         if not events:
             self.db.set_state(pid, keep_state)
             self.send(pid, 'Ближайших напоминаний нет.', final_kb or V.kb_main())
             return
 
+        shown = 0
+
         for ev in events[:5]:
-            start = ev.get('start', {}).get('dateTime') or ev.get('start', {}).get('date') or ''
-            summary = ev.get('summary', 'Без названия')
-            description = (ev.get('description') or '').strip()
+            try:
+                start = ev.get('start', {}).get('dateTime') or ev.get('start', {}).get('date') or ''
+                summary = ev.get('summary', 'Без названия')
+                description = (ev.get('description') or '').strip()
 
-            fid = cal.get_drive_id(ev)
+                msg = f"⏰ {summary}\n🕒 {start}"
+                if description:
+                    msg += f"\n\n{description}"
 
-            if fid:
-                try:
-                    raw = drive.download_text(fid)
-                    body = summarize(raw)
-                    prefix = 'Краткий пересказ:' if ai_on() else '📝 Текст конспекта:'
-                    msg = f"⏰ {summary}\n🕒 {start}\n\n{prefix}\n{body}"
-                except Exception as e:
-                    extra = f"\n\nОписание:\n{description}" if description else ''
-                    msg = f"⏰ {summary}\n🕒 {start}{extra}\n\n(не удалось получить файл: {e})"
-            else:
-                extra = f"\n\nОписание:\n{description}" if description else ''
-                msg = f"⏰ {summary}\n🕒 {start}{extra}"
+                self.send(pid, msg)
+                shown += 1
+            except Exception as e:
+                self.send(pid, f"⏰ {ev.get('summary', 'Без названия')}\n\n(не удалось прочитать событие: {e})")
 
-            self.send(pid, msg)
+        if shown == 0:
+            self.db.set_state(pid, keep_state)
+            self.send(pid, 'Ближайших напоминаний нет.', final_kb or V.kb_main())
+            return
 
         self.db.set_state(pid, keep_state)
         self.send(pid, final_text, final_kb or V.kb_main())
+
 
 
