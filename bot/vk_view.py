@@ -22,9 +22,8 @@ def kb_ai_confirm():
     kb = VkKeyboard(one_time=False)
     kb.add_button('Подтвердить', color=VkKeyboardColor.POSITIVE, payload={'a': 'ai_confirm'})
     kb.add_line()
-    kb.add_button('Отмена', color=VkKeyboardColor.NEGATIVE, payload={'a': 'ai_reject'})
+    kb.add_button('Не сохранять', color=VkKeyboardColor.NEGATIVE, payload={'a': 'ai_reject'})
     return kb
-
 
 def kb_subjects(subjects: list[str]):
     kb = VkKeyboard(one_time=False)
