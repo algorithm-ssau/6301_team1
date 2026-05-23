@@ -1,6 +1,8 @@
 import re
 import json
 import datetime as dt
+
+import dateparser
 from vk_api.utils import get_random_id
 from ai_helper import summarize, is_enabled as ai_on, chat_turn, trim_history
 
@@ -216,40 +218,49 @@ class BotController:
         self.db.set_state(pid, 'ai_chat')
         self.send(pid, f'✅ Напоминание создано:\n{start:%d.%m.%Y %H:%M}\n{ev.get("htmlLink", "")}', V.kb_cancel())
 
-    def _execute_ai_save_summary(self, pid, action, current_subject):
+    def _execute_ai_reminder(self, pid, action, current_subject):
         cal, drive = self._services(pid)
 
-        subject = (action.get('subject') or current_subject or '').strip()
-        if not subject:
+        when_text = (action.get('when_text') or '').strip()
+        if not when_text:
             self.db.set_pending_action(pid, None)
             self.db.set_state(pid, 'ai_chat')
-            self.send(pid, 'Не вижу предмета. Напишите его в сообщении или сначала выберите предмет вручную.',
-                      V.kb_cancel())
+            self.send(pid, 'Не вижу дату и время. Напишите, например: завтра в 19:00.', V.kb_cancel())
             return
 
-        title = (action.get('title') or 'Конспект').strip()
-        content = (action.get('content') or '').strip()
-
-        if not content:
-            self.db.set_pending_action(pid, None)
-            self.db.set_state(pid, 'ai_chat')
-            self.send(pid, 'Текст конспекта получился пустым, сохранять нечего.', V.kb_cancel())
-            return
-
-        date_str = dt.datetime.now().strftime('%d.%m.%Y')
-        filename = f"[{subject}] {_safe_filename(title)}.md"
-        body = (
-            f"Название: {title}\n"
-            f"Предмет: {subject}\n"
-            f"Дата: {date_str}\n\n"
-            f"Конспект:\n{content}"
+        start = dateparser.parse(
+            when_text,
+            languages=['ru'],
+            settings={
+                'TIMEZONE': 'Europe/Samara',
+                'RETURN_AS_TIMEZONE_AWARE': False,
+                'PREFER_DATES_FROM': 'future',
+            }
         )
 
-        fid, link = drive.upload_note(filename, body)
+        if not start:
+            self.db.set_pending_action(pid, None)
+            self.db.set_state(pid, 'ai_chat')
+            self.send(pid, 'Не смог понять дату и время. Напишите точнее, например: 25.05.2026 18:30.', V.kb_cancel())
+            return
+
+        end = start + dt.timedelta(hours=1)
+
+        subject = (action.get('subject') or current_subject or '').strip()
+        title = (action.get('title') or 'Напоминание').strip()
+        description = (action.get('description') or '').strip()
+
+        summary = f'[{subject}] {title}' if subject else title
+
+        ev = cal.add_event(summary, start, end, description=description)
 
         self.db.set_pending_action(pid, None)
         self.db.set_state(pid, 'ai_chat')
-        self.send(pid, f'✅ Сохранил конспект:\n{link}', V.kb_cancel())
+        self.send(
+            pid,
+            f'✅ Напоминание создано на {start:%d.%m.%Y %H:%M}\n{ev.get("htmlLink", "")}',
+            V.kb_cancel()
+        )
 
     def st_selecting_subject(self, pid, text, a, v, subj, subs, temp):
         if a == 'add_subject':
