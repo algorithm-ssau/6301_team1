@@ -27,7 +27,6 @@ class BotController:
         self.db.set_creds(user_id, creds.to_json())
         return CalendarAPI(creds), DriveAPI(creds)
 
-
     # ---------- отправка ----------
     def send(self, peer_id, text, kb=None):
         p = {'peer_id': peer_id, 'message': text, 'random_id': get_random_id()}
@@ -78,6 +77,9 @@ class BotController:
                       V.kb_subjects(subs))
         elif a == 'upcoming':
             self.show_upcoming(pid)
+        elif a == 'ai_chat':
+            self.db.set_state(pid, 'ai_chat')
+            self.send(pid, 'AI-чат включён. Пишите сообщением. Для выхода нажмите Отмена.', V.kb_cancel())
         else:
             self.send(pid, 'Пользуйся кнопками.', V.kb_main())
 
