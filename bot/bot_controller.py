@@ -129,6 +129,32 @@ class BotController:
         self.db.set_state(pid, 'ai_confirm_action')
         self.send(pid, self._format_ai_action(action), V.kb_ai_confirm())
 
+    def st_ai_confirm_action(self, pid, text, a, v, subj, subs, temp):
+        if a == 'ai_reject':
+            self.db.set_pending_action(pid, None)
+            self.db.set_state(pid, 'ai_chat')
+            self.send(pid, 'Действие отменено.', V.kb_cancel())
+            return
+
+        if a != 'ai_confirm':
+            self.send(pid, 'Нажмите Подтвердить или Отмена.', V.kb_ai_confirm())
+            return
+
+        action = self.db.get_pending_action(pid)
+        if not action:
+            self.db.set_state(pid, 'ai_chat')
+            self.send(pid, 'Не найдено ожидающее действие.', V.kb_cancel())
+            return
+
+        if action['intent'] == 'create_reminder':
+            self._execute_ai_reminder(pid, action, subj)
+        elif action['intent'] == 'save_summary':
+            self._execute_ai_save_summary(pid, action, subj)
+        else:
+            self.send(pid, 'Неизвестное действие.', V.kb_cancel())
+            self.db.set_state(pid, 'ai_chat')
+            self.db.set_pending_action(pid, None)
+
     def _format_ai_action(self, action: dict) -> str:
         if action['intent'] == 'create_reminder':
             return (
