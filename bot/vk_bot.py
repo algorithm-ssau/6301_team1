@@ -30,9 +30,17 @@ def main():
         text = (msg.get('text') or '').strip()
         payload = None
         if msg.get('payload'):
-            try: payload = json.loads(msg['payload'])
-            except json.JSONDecodeError: pass
-        ctrl.handle(peer_id, text, payload)
+            try:
+                payload = json.loads(msg['payload'])
+            except json.JSONDecodeError:
+                pass
+
+        docs = []
+        for att in msg.get('attachments', []):
+            if att.get('type') == 'doc' and att.get('doc'):
+                docs.append(att['doc'])
+
+        ctrl.handle(peer_id, text, payload, docs=docs)
 
 if __name__ == '__main__':
     main()
